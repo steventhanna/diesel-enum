@@ -49,7 +49,7 @@ pub enum Status {
 }
 ```
 
-Alternatively you can use strings, with will be cast to lowercase. (e.g. `Status::Ready` will be
+Alternatively you can use strings, which will be cast to lowercase by default. (e.g. `Status::Ready` will be
 stored as `"ready"` in the database):
 
 ```rust
@@ -64,6 +64,35 @@ pub enum Status {
     Pending,
 }
 ```
+
+### Case Conversion
+
+For string types, you can specify a case convention using the `case` attribute. Supported options are:
+- `lowercase` (default) - e.g., `ReadyToGo` → `"readytogo"`
+- `UPPERCASE` - e.g., `ReadyToGo` → `"READYTOGO"`
+- `camelCase` - e.g., `ReadyToGo` → `"readyToGo"`
+- `PascalCase` - e.g., `ReadyToGo` → `"ReadyToGo"`
+- `snake_case` - e.g., `ReadyToGo` → `"ready_to_go"`
+- `SCREAMING_SNAKE_CASE` - e.g., `ReadyToGo` → `"READY_TO_GO"`
+- `kebab-case` - e.g., `ReadyToGo` → `"ready-to-go"`
+
+Example using `snake_case`:
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq, AsExpression, FromSqlRow, DbEnum)]
+#[diesel(sql_type = VarChar)]
+#[diesel_enum(error_fn = CustomError::not_found)]
+#[diesel_enum(error_type = CustomError)]
+#[diesel_enum(case = "snake_case")]
+pub enum Status {
+    /// Will be represented as `"ready_to_go"`.
+    ReadyToGo,
+    /// Will be represented as `"pending_review"`.
+    PendingReview,
+}
+```
+
+The `case` attribute works together with the `val` attribute - if a variant has an explicit `val` attribute, it will override the case conversion for that specific variant.
 
 Another option is to manually override the values set for each or some of the variants. This is done
 using the `val` attribute:
