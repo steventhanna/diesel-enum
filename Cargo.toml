@@ -1,12 +1,11 @@
 [package]
-name = "diesel-enum"
-version = "0.2.1"
-authors = ["Luuk Wester <luuk.wester@gmail.com>"]
+name = "diesel-enum-case"
+version = "0.3.0"
+authors = ["Steven Hanna <steventhanna@gmail.com>"]
 edition = "2018"
-description = "Interop between your enums and your database with diesel"
-repository = "https://github.com/ThouCheese/diesel-enum"
-documentation = "https://docs.rs/diesel-enum"
-keywords = ["diesel", "database", "enum"]
+description = "Interop between your enums and your database with diesel, with customizable case conversion for string enums"
+repository = "https://github.com/steventhanna/diesel-enum"
+keywords = ["diesel", "database", "enum", "case", "conversion"]
 readme = "README.md"
 categories = ["database", "data-structures"]
 license = "MIT"

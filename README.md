@@ -18,7 +18,7 @@ and from the Rust type into the enum (`TryInto`).
 ### Usage
 
 ```rust
-use diesel_enum::DbEnum;
+use diesel_enum_case::DbEnum;
 use diesel::{deserialize::FromSqlRow, sql_types::{SmallInt, VarChar}};
 
 #[derive(Debug, thiserror::Error)]

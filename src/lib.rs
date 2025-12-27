@@ -18,7 +18,7 @@
 //! ### Usage
 //! ```rust
 //! #[macro_use] extern crate diesel;
-//! use diesel_enum::DbEnum;
+//! use diesel_enum_case::DbEnum;
 //! use diesel::{deserialize::FromSqlRow, sql_types::SmallInt};
 //!
 //! #[derive(Debug, thiserror::Error)]
