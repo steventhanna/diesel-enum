@@ -48,7 +48,7 @@
 //!     Pending,
 //! }
 //! ```
-//! Alternatively you can use strings, with will be cast to lowercase. (e.g. `Status::Ready` will be
+//! Alternatively you can use strings, which will be cast to lowercase by default. (e.g. `Status::Ready` will be
 //! stored as `"ready"` in the database):
 //! ```rust
 //! #[derive(Debug, Clone, Copy, PartialEq, Eq, FromSqlRow, DbEnum)]
@@ -62,9 +62,110 @@
 //!     Pending,
 //! }
 //! ```
+//!
+//! You can also specify a case convention using the `case` attribute. Supported options are:
+//! `lowercase`, `UPPERCASE`, `camelCase`, `PascalCase`, `snake_case`, `SCREAMING_SNAKE_CASE`, `kebab-case`.
+//! For example, using `snake_case`:
+//! ```rust
+//! #[derive(Debug, Clone, Copy, PartialEq, Eq, FromSqlRow, DbEnum)]
+//! #[diesel(sql_type = VarChar)]
+//! #[diesel_enum(error_fn = CustomError::not_found)]
+//! #[diesel_enum(error_type = CustomError)]
+//! #[diesel_enum(case = "snake_case")]
+//! pub enum Status {
+//!     /// Will be represented as `"ready_to_go"`.
+//!     ReadyToGo,
+//!     /// Will be represented as `"pending_review"`.
+//!     PendingReview,
+//! }
+//! ```
 
 use quote::quote;
 use syn::spanned::Spanned;
+
+#[derive(Clone, Copy, Default)]
+enum CaseConvention {
+    #[default]
+    Lowercase,
+    Uppercase,
+    CamelCase,
+    PascalCase,
+    SnakeCase,
+    ScreamingSnakeCase,
+    KebabCase,
+}
+
+impl CaseConvention {
+    fn from_str(s: &str) -> Result<Self, String> {
+        match s {
+            "lowercase" => Ok(CaseConvention::Lowercase),
+            "UPPERCASE" => Ok(CaseConvention::Uppercase),
+            "camelCase" => Ok(CaseConvention::CamelCase),
+            "PascalCase" => Ok(CaseConvention::PascalCase),
+            "snake_case" => Ok(CaseConvention::SnakeCase),
+            "SCREAMING_SNAKE_CASE" => Ok(CaseConvention::ScreamingSnakeCase),
+            "kebab-case" => Ok(CaseConvention::KebabCase),
+            _ => Err(format!(
+                "Invalid case convention: {}. Valid options are: lowercase, UPPERCASE, camelCase, PascalCase, snake_case, SCREAMING_SNAKE_CASE, kebab-case",
+                s
+            )),
+        }
+    }
+
+    fn convert(&self, variant_name: &str) -> String {
+        match self {
+            CaseConvention::Lowercase => variant_name.to_lowercase(),
+            CaseConvention::Uppercase => variant_name.to_uppercase(),
+            CaseConvention::PascalCase => variant_name.to_string(),
+            _ => {
+                // Rust enum variants are PascalCase, so we convert from PascalCase to target format
+                let words = Self::split_pascal_case(variant_name);
+                match self {
+                    CaseConvention::CamelCase => {
+                        let mut result = String::new();
+                        for (i, word) in words.iter().enumerate() {
+                            if i == 0 {
+                                result.push_str(&word.to_lowercase());
+                            } else {
+                                result.push_str(&Self::capitalize_first(word));
+                            }
+                        }
+                        result
+                    }
+                    CaseConvention::SnakeCase => words.join("_").to_lowercase(),
+                    CaseConvention::ScreamingSnakeCase => words.join("_").to_uppercase(),
+                    CaseConvention::KebabCase => words.join("-").to_lowercase(),
+                    _ => unreachable!(),
+                }
+            }
+        }
+    }
+
+    fn split_pascal_case(s: &str) -> Vec<String> {
+        let mut words = Vec::new();
+        let mut current = String::new();
+        
+        for ch in s.chars() {
+            if ch.is_uppercase() && !current.is_empty() {
+                words.push(current);
+                current = String::new();
+            }
+            current.push(ch);
+        }
+        if !current.is_empty() {
+            words.push(current);
+        }
+        words
+    }
+
+    fn capitalize_first(s: &str) -> String {
+        let mut chars = s.chars();
+        match chars.next() {
+            None => String::new(),
+            Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        }
+    }
+}
 
 macro_rules! try_or_return {
     ($inp:expr) => {
@@ -82,6 +183,7 @@ struct MacroState<'a> {
     rust_type: syn::Ident,
     error_type: syn::Path,
     error_fn: syn::Path,
+    case: CaseConvention,
 }
 
 impl<'a> MacroState<'a> {
@@ -93,6 +195,14 @@ impl<'a> MacroState<'a> {
             .map(|a| a.tokens.to_string())?;
         let trimmed = val[1..].trim();
         syn::parse_str(trimmed).ok()
+    }
+
+    fn variant_string_literal(&self, variant: &syn::Variant, span: proc_macro2::Span) -> syn::Lit {
+        use syn::{Lit::Str, LitStr};
+        Self::val(variant).unwrap_or_else(|| {
+            let converted = self.case.convert(&variant.ident.to_string());
+            Str(LitStr::new(&converted, span))
+        })
     }
 
     fn rust_type(sql_type: &syn::Ident) -> Result<syn::Ident, proc_macro2::TokenStream> {
@@ -138,11 +248,7 @@ impl<'a> MacroState<'a> {
                 }
             }
             "String" => {
-                let field_names = self.variants.iter().map(|v| {
-                    use syn::{Lit::Str, LitStr};
-                    let fallback = v.ident.to_string().to_lowercase();
-                    Self::val(v).unwrap_or_else(|| Str(LitStr::new(&fallback, span)))
-                });
+                let field_names = self.variants.iter().map(|v| self.variant_string_literal(v, span));
 
                 quote! {
                     match inp.as_str() {
@@ -191,11 +297,7 @@ impl<'a> MacroState<'a> {
                 }
             }
             "String" => {
-                let field_names = self.variants.iter().map(|v| {
-                    use syn::{Lit::Str, LitStr};
-                    let fallback = v.ident.to_string().to_lowercase();
-                    Self::val(v).unwrap_or_else(|| Str(LitStr::new(&fallback, span)))
-                });
+                let field_names = self.variants.iter().map(|v| self.variant_string_literal(v, span));
 
                 quote! {
                     match self {
@@ -264,9 +366,7 @@ impl<'a> MacroState<'a> {
             "String" => {
                 let variants = self.variants.iter().map(|f| &f.ident);
                 let field_names = self.variants.iter().map(|&v| {
-                    use syn::{Lit::Str, LitStr};
-                    let fallback = v.ident.to_string().to_lowercase();
-                    let val = Self::val(v).unwrap_or_else(|| Str(LitStr::new(&fallback, span)));
+                    let val = self.variant_string_literal(v, span);
                     quote! {
                         #val.to_sql(out)
                     }
@@ -349,6 +449,38 @@ fn get_attr_path(
     syn::parse_str(s).map_err(|_| error(stream.span(), "Invalid path"))
 }
 
+fn get_optional_attr_string(
+    attrs: &[syn::Attribute],
+    outer: &str,
+    inner: &str,
+) -> Option<(String, proc_macro2::Span)> {
+    attrs
+        .iter()
+        .filter(|a| a.path.get_ident().map(|i| i == outer).unwrap_or(false))
+        .map(|a| &a.tokens)
+        .find(|s| s.to_string().contains(inner))
+        .and_then(|stream| {
+            let s = stream.to_string();
+            s.split('=')
+                .nth(1)
+                .map(|s| (s.trim_matches(|c| " )\"".contains(c)).to_string(), stream.span()))
+        })
+}
+
+fn get_attr_case(
+    attrs: &[syn::Attribute],
+    outer: &str,
+    inner: &str,
+) -> Result<CaseConvention, proc_macro2::TokenStream> {
+    match get_optional_attr_string(attrs, outer, inner) {
+        Some((case_str, span)) => {
+            CaseConvention::from_str(&case_str)
+                .map_err(|msg| error(span, &msg))
+        }
+        None => Ok(CaseConvention::default()),
+    }
+}
+
 fn error(span: proc_macro2::Span, message: &str) -> proc_macro2::TokenStream {
     syn::Error::new(span, message).into_compile_error()
 }
@@ -360,6 +492,7 @@ pub fn db_enum(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let sql_type = try_or_return!(get_attr_ident(&input.attrs, "diesel", "sql_type"));
     let error_fn = try_or_return!(get_attr_path(&input.attrs, "diesel_enum", "error_fn"));
     let error_type = try_or_return!(get_attr_path(&input.attrs, "diesel_enum", "error_type"));
+    let case = try_or_return!(get_attr_case(&input.attrs, "diesel_enum", "case"));
     let rust_type = try_or_return!(MacroState::rust_type(&sql_type));
     let span = proc_macro2::Span::call_site();
     let data = match input.data {
@@ -374,6 +507,7 @@ pub fn db_enum(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         rust_type,
         error_fn,
         error_type,
+        case,
     };
     let impl_for_from_sql = state.impl_for_from_sql();
     let to_sql = state.to_sql();
